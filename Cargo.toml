@@ -1,0 +1,6 @@
+[package]
+name = "udi-forwarder"
+version = "0.1.0"
+authors = ["Dan McNulty <dkmcnulty@gmail.com>"]
+
+[dependencies]

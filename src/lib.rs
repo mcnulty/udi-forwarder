@@ -2,26 +2,67 @@
 
 mod udi;
 
+extern crate mio;
+extern crate ws;
 extern crate notify;
 
 use std::thread;
+use std::sync::mpsc::channel;
 
-use mio::{EventLoop, Handler, Sender}
+use mio::{EventLoop, Handler};
 
-// TODO need mio Handler that processes both WS messages and
-// FS events. This handler will also write to the FS and WS
-// connections depending on events. The WS will need to be
-// registered with the handler somehow. 
+use notify::Watcher;
+
+struct EventMessage;
+
+struct EventHandler
+{
+    sender: ws::Sender,
+}
+
+impl Handler for EventHandler {
+    type Timeout = ();
+    type Message = EventMessage;
+
+    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
+        // TODO
+    }
+}
 
 //
 // Use notify to monitor the root filesystem
 //
-fn setup_monitor(root: &str, event_sink: Sender<?>) {
+fn setup_monitor(root: &str,
+                 event_sink: mio::Sender<EventMessage>) -> notify::Result<JoinHandle> {
 
+    let (tx, rx) = channel();
+
+    Watcher::new(tx).and_then(|watcher| watcher.watch(root))
+                    .map(|watcher| {
+                        thread::spawn(move || {
+                            loop {
+                                match rx.recv() {
+                                    // TODO handle filesystem events
+                                    _ => ()
+                                }
+                            }
+                        });
+                    });
 }
 
-fn setup_ws_server(bind_address: &str, port: u16) {
+fn setup_ws_server(bind_address: &str,
+                   port: u16,
+                   event_sink: mio::Sender<EventMessage>) -> ws::Result<ws::Sender> {
 
+    let ws_handler = |out| {
+        move |msg| {
+            // TODO send message to event_sink
+        }
+    };
+
+    ws::Builder::new().build(ws_handler)
+                      .and_then(|web_socket| web_socket.listen((bind_address, port)))
+                      .map(|web_socket| web_socket.broadcaster());
 }
 
 // Origin Flow

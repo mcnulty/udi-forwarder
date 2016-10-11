@@ -7,11 +7,12 @@ extern crate ws;
 extern crate notify;
 
 use std::thread;
+use std::thread::JoinHandle;
 use std::sync::mpsc::channel;
 
 use mio::{EventLoop, Handler};
 
-use notify::Watcher;
+use notify::{RecommendedWatcher, Watcher};
 
 struct EventMessage;
 
@@ -33,36 +34,54 @@ impl Handler for EventHandler {
 // Use notify to monitor the root filesystem
 //
 fn setup_monitor(root: &str,
-                 event_sink: mio::Sender<EventMessage>) -> notify::Result<JoinHandle> {
+                 event_sink: mio::Sender<EventMessage>) -> 
+                 notify::Result<JoinHandle<std::io::Result<()>>> {
 
     let (tx, rx) = channel();
 
-    Watcher::new(tx).and_then(|watcher| watcher.watch(root))
-                    .map(|watcher| {
-                        thread::spawn(move || {
-                            loop {
-                                match rx.recv() {
-                                    // TODO handle filesystem events
-                                    _ => ()
-                                }
-                            }
-                        });
-                    });
+    let watcher_result: notify::Result<RecommendedWatcher> = Watcher::new(tx);
+    watcher_result.and_then(|mut watcher| watcher.watch(root))
+        .map(|watcher| {
+            thread::spawn(move || {
+                loop {
+                    match rx.recv() {
+                        // TODO handle filesystem events
+                        _ => ()
+                    }
+                }
+            })
+        })
+}
+
+struct LocalWsHandler {
+    sender: ws::Sender,
+}
+
+impl ws::Handler for LocalWsHandler {
+
+    fn on_message(&mut self, message: ws::Message) -> ws::Result<()> {
+        Ok(()) as ws::Result<()>
+    }
+}
+
+struct LocalWsFactory;
+
+impl ws::Factory for LocalWsFactory {
+    type Handler = LocalWsHandler;
+
+    fn connection_made(&mut self, sender: ws::Sender) -> LocalWsHandler  {
+        LocalWsHandler { sender: sender }
+    }
 }
 
 fn setup_ws_server(bind_address: &str,
                    port: u16,
                    event_sink: mio::Sender<EventMessage>) -> ws::Result<ws::Sender> {
 
-    let ws_handler = |out| {
-        move |msg| {
-            // TODO send message to event_sink
-        }
-    };
+    let web_socket_result = ws::Builder::new().build(LocalWsFactory);
 
-    ws::Builder::new().build(ws_handler)
-                      .and_then(|web_socket| web_socket.listen((bind_address, port)))
-                      .map(|web_socket| web_socket.broadcaster());
+    web_socket_result.and_then(|web_socket| web_socket.listen((bind_address, port)))
+        .map(|web_socket| web_socket.broadcaster())
 }
 
 // Origin Flow

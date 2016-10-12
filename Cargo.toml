@@ -1,7 +1,15 @@
 [package]
-name = "udi-forwarder"
+name = "udi_forwarder"
 version = "0.1.0"
 authors = ["Dan McNulty <dkmcnulty@gmail.com>"]
+
+[lib]
+name = "udi_forwarder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "udi-forwarder"
+path = "src/bin.rs"
 
 [dependencies]
 

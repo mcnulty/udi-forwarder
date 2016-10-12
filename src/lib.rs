@@ -6,6 +6,8 @@ extern crate mio;
 extern crate ws;
 extern crate notify;
 
+use std::result::Result;
+use std::error::Error;
 use std::thread;
 use std::thread::JoinHandle;
 use std::sync::mpsc::channel;
@@ -35,22 +37,25 @@ impl Handler for EventHandler {
 //
 fn setup_monitor(root: &str,
                  event_sink: mio::Sender<EventMessage>) -> 
-                 notify::Result<JoinHandle<std::io::Result<()>>> {
+                 Result<JoinHandle<Result<(), std::io::Error>>, Box<Error>> {
 
     let (tx, rx) = channel();
 
-    let watcher_result: notify::Result<RecommendedWatcher> = Watcher::new(tx);
-    watcher_result.and_then(|mut watcher| watcher.watch(root))
-        .map(|watcher| {
-            thread::spawn(move || {
-                loop {
-                    match rx.recv() {
-                        // TODO handle filesystem events
-                        _ => ()
-                    }
+    let mut watcher: RecommendedWatcher = try!(Watcher::new(tx));
+
+    try!(watcher.watch(root));
+
+    let join_handle = thread::spawn(move || {
+        loop {
+            match rx.recv() {
+                _ => {
+                    return Ok(())
                 }
-            })
-        })
+            }
+        }
+    });
+
+    Ok(join_handle)
 }
 
 struct LocalWsHandler {
@@ -60,6 +65,7 @@ struct LocalWsHandler {
 impl ws::Handler for LocalWsHandler {
 
     fn on_message(&mut self, message: ws::Message) -> ws::Result<()> {
+        // TODO
         Ok(()) as ws::Result<()>
     }
 }
@@ -76,12 +82,15 @@ impl ws::Factory for LocalWsFactory {
 
 fn setup_ws_server(bind_address: &str,
                    port: u16,
-                   event_sink: mio::Sender<EventMessage>) -> ws::Result<ws::Sender> {
+                   event_sink: mio::Sender<EventMessage>) -> Result<ws::Sender, Box<Error>> {
 
-    let web_socket_result = ws::Builder::new().build(LocalWsFactory);
+    let web_socket = try!(ws::Builder::new().build(LocalWsFactory));
 
-    web_socket_result.and_then(|web_socket| web_socket.listen((bind_address, port)))
-        .map(|web_socket| web_socket.broadcaster())
+    let sender = web_socket.broadcaster();
+
+    try!(web_socket.listen((bind_address, port)));
+
+    Ok(sender)
 }
 
 // Origin Flow
@@ -90,8 +99,15 @@ fn setup_ws_server(bind_address: &str,
 // Monitor UDI root dir for new entries
 // When UDI root dir has new entry, attempt to perform UDI handshake.
 // If successful, send new process event to forwarder
-pub fn monitor_udi_filesystem(root: &str, bind_address: &str, port: u16) {
+pub fn monitor_udi_filesystem(root: &str, bind_address: &str, port: u16) -> Result<(), Box<Error>> {
 
+    let mut event_loop = try!(EventLoop::new());
+
+    let ws_sender = try!(setup_ws_server(bind_address, port, event_loop.channel()));
+
+    try!(setup_monitor(root, event_loop.channel()));
+
+    Ok(try!(event_loop.run(&mut EventHandler{ sender: ws_sender })))
 }
 
 pub fn forward_udi_filesystem(root: &str, host_address: &str, port: u16) {
